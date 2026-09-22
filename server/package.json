@@ -1,0 +1,14 @@
+{
+  "name": "unity-remote-console",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-hosted remote log console for Unity apps on a LAN.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  }
+}

@@ -1,0 +1,22 @@
+# Fallback: standard bridged networking.
+#
+# The web UI and log ingest work fine, but UDP auto-discovery will NOT reach the
+# container across the LAN. Set `Manual Host` in the Unity client instead, e.g.
+# "192.168.1.50:8080" (the host machine's LAN IP).
+#
+# Run with:  docker compose -f docker-compose.bridge.yml up --build
+
+services:
+  remote-console:
+    build: .
+    container_name: unity-remote-console
+    ports:
+      - "8080:8080"
+      # UDP mapping is included for completeness but LAN broadcast still won't
+      # reach a bridged container; auto-discovery is not expected to work here.
+      - "9999:9999/udp"
+    environment:
+      - PORT=8080
+      - DISCOVERY_PORT=9999
+      - BUFFER_SIZE=5000
+    restart: unless-stopped

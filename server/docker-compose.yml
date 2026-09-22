@@ -1,0 +1,18 @@
+# Recommended: host networking. UDP broadcast discovery only works when the
+# container shares the host's network stack (a bridged container will NOT see
+# broadcast packets coming from other devices on your LAN).
+#
+# host networking works on Linux hosts. On Docker Desktop for Mac/Windows it is
+# limited, so on those either run the server directly with `npm start`, or use
+# docker-compose.bridge.yml and set a Manual Host in the Unity client.
+
+services:
+  remote-console:
+    build: .
+    container_name: unity-remote-console
+    network_mode: host
+    environment:
+      - PORT=8080
+      - DISCOVERY_PORT=9999
+      - BUFFER_SIZE=5000
+    restart: unless-stopped

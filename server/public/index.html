@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Unity Remote Console</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2338bdf8'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <div>
+          <div class="brand-name">Remote Console</div>
+          <div class="brand-host" id="serverName">connecting…</div>
+        </div>
+      </div>
+
+      <div class="side-heading">Devices</div>
+      <div id="deviceList" class="device-list">
+        <div class="empty-hint">No devices yet. Start a build with the client attached.</div>
+      </div>
+    </aside>
+
+    <main id="main">
+      <header id="toolbar">
+        <div class="levels" id="levelFilters">
+          <button class="lvl-toggle" data-level="Log" data-on="1">Log</button>
+          <button class="lvl-toggle" data-level="Warning" data-on="1">Warning</button>
+          <button class="lvl-toggle" data-level="Error" data-on="1">Error</button>
+          <button class="lvl-toggle" data-level="Assert" data-on="1">Assert</button>
+          <button class="lvl-toggle" data-level="Exception" data-on="1">Exception</button>
+        </div>
+
+        <input id="search" type="search" placeholder="Filter messages…" spellcheck="false" autocomplete="off" />
+
+        <div class="tools">
+          <button id="btnScroll" class="tool on" title="Follow tail">Follow</button>
+          <button id="btnPause" class="tool" title="Pause incoming">Pause</button>
+          <button id="btnWrap" class="tool" title="Wrap long lines">Wrap</button>
+          <button id="btnClear" class="tool danger" title="Clear the server buffer">Clear</button>
+        </div>
+      </header>
+
+      <div id="logView">
+        <div id="logList"></div>
+        <div id="scrollAnchor"></div>
+      </div>
+
+      <footer id="statusbar">
+        <span class="status-dot" id="connDot"></span>
+        <span id="connText">disconnected</span>
+        <span class="sep">·</span>
+        <span id="countText">0 shown</span>
+        <span class="sep">·</span>
+        <span id="filterText">all devices</span>
+        <span class="grow"></span>
+        <span id="pausedBadge" class="paused-badge" hidden>paused — buffering</span>
+      </footer>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
