@@ -92,6 +92,58 @@ app.post('/clear', (req, res) => {
 
 app.get('/healthz', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
 
+// ---- Export: download the buffer as a plain-text .log file ----
+function deviceDisplay(s) {
+  const d = (s && s.device) || {};
+  return d.model || d.name || (s && s.id) || 'device';
+}
+
+function slug(x) {
+  return String(x).replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'device';
+}
+
+function pad(n, w = 2) { return String(n).padStart(w, '0'); }
+
+function formatLogLine(l) {
+  const d = new Date(l.t);
+  const ts =
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+  let out = `[${ts}] [${l.level}] ${l.message}`;
+  if (l.stack && l.stack.trim()) {
+    out += '\n' + l.stack.trim().split('\n').map((line) => '    ' + line).join('\n');
+  }
+  return out;
+}
+
+app.get('/export', (req, res) => {
+  const sid = req.query.session ? String(req.query.session) : null;
+  const items = sid ? ring.filter((l) => l.session === sid) : ring;
+  const s = sid ? sessions.get(sid) : null;
+  const now = new Date();
+
+  const header = [
+    '# Unity Remote Console export',
+    s ? `# device: ${deviceDisplay(s)}` : '# device: all devices',
+    s && s.device ? `# platform: ${s.device.platform || '?'} | app: ${s.device.app || '?'} | os: ${s.device.os || '?'}` : null,
+    sid ? `# session: ${sid}` : null,
+    `# exported: ${now.toISOString()}`,
+    `# entries: ${items.length}`,
+    '# ----------------------------------------------------------------------',
+    '',
+  ].filter((x) => x !== null).join('\n');
+
+  const text = header + items.map(formatLogLine).join('\n') + (items.length ? '\n' : '');
+
+  const stamp = now.toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
+  const scope = s ? slug(deviceDisplay(s)) : 'all-devices';
+  const fname = `unity-logs_${scope}_${stamp}.log`;
+
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
+  res.send(text);
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---- Presence sweeper: flip sessions offline when they stop reporting ----

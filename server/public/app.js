@@ -3,6 +3,7 @@
 // ---------- State ----------
 const MAX_LOGS = 8000;       // full log buffer kept client-side for filtering
 const MAX_DOM_ROWS = 3000;   // hard cap on rendered rows for performance
+const MAX_DETAIL_CHARS = 20000; // cap on how much of one message/stack we render in the detail panel
 
 const state = {
   logs: [],                        // all logs (capped at MAX_LOGS)
@@ -25,6 +26,7 @@ const el = {
   btnScroll: document.getElementById('btnScroll'),
   btnPause: document.getElementById('btnPause'),
   btnWrap: document.getElementById('btnWrap'),
+  btnDownload: document.getElementById('btnDownload'),
   btnClear: document.getElementById('btnClear'),
   connDot: document.getElementById('connDot'),
   connText: document.getElementById('connText'),
@@ -68,8 +70,7 @@ function passesFilter(log) {
 // ---------- Rendering ----------
 function makeRow(log) {
   const row = document.createElement('div');
-  row.className = `row lvl-${log.level}`;
-  if (log.stack && log.stack.trim()) row.classList.add('has-stack');
+  row.className = `row lvl-${log.level} expandable`;
   row.dataset.id = log.id;
 
   const ts = document.createElement('span');
@@ -89,22 +90,106 @@ function makeRow(log) {
   row.appendChild(tag);
   row.appendChild(msg);
 
-  if (log.stack && log.stack.trim()) {
-    row.addEventListener('click', () => toggleStack(row, log));
-  }
+  row.addEventListener('click', () => toggleDetail(row, log));
   return row;
 }
 
-function toggleStack(row, log) {
+// Cap a string for display; the download endpoint always has the untruncated text.
+function clipForDisplay(s) {
+  if (s.length <= MAX_DETAIL_CHARS) return { text: s, truncated: 0 };
+  return { text: s.slice(0, MAX_DETAIL_CHARS), truncated: s.length - MAX_DETAIL_CHARS };
+}
+
+function buildSection(labelText, fullText) {
+  const section = document.createElement('div');
+  section.className = 'detail-section';
+
+  const head = document.createElement('div');
+  head.className = 'detail-head';
+
+  const label = document.createElement('span');
+  label.className = 'detail-label';
+  label.textContent = `${labelText} · ${fullText.length.toLocaleString()} chars`;
+
+  const copy = document.createElement('button');
+  copy.className = 'detail-copy';
+  copy.textContent = 'Copy';
+  copy.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const ok = await copyText(fullText); // copies the FULL untruncated text
+    copy.textContent = ok ? 'Copied' : 'Copy failed';
+    copy.classList.toggle('done', ok);
+    setTimeout(() => { copy.textContent = 'Copy'; copy.classList.remove('done'); }, 1400);
+  });
+
+  head.appendChild(label);
+  head.appendChild(copy);
+
+  const body = document.createElement('div');
+  body.className = 'detail-body';
+  const { text, truncated } = clipForDisplay(fullText);
+  body.textContent = text;
+
+  section.appendChild(head);
+  section.appendChild(body);
+
+  if (truncated > 0) {
+    const note = document.createElement('div');
+    note.className = 'detail-note';
+    note.textContent =
+      `Truncated for display at ${MAX_DETAIL_CHARS.toLocaleString()} characters ` +
+      `(${truncated.toLocaleString()} more). Use Copy, or Download the log file, to get all of it.`;
+    section.appendChild(note);
+  }
+  return section;
+}
+
+function toggleDetail(row, log) {
   const existing = row.nextElementSibling;
-  if (existing && existing.classList.contains('stack')) {
+  if (existing && existing.classList.contains('detail')) {
     existing.remove();
+    row.classList.remove('open');
     return;
   }
-  const s = document.createElement('div');
-  s.className = 'stack';
-  s.textContent = log.stack.trim();
-  row.after(s);
+
+  const panel = document.createElement('div');
+  panel.className = 'detail';
+  // Clicks inside the panel (selecting text, Copy) must not toggle the row.
+  panel.addEventListener('click', (e) => e.stopPropagation());
+
+  panel.appendChild(buildSection('Message', log.message || ''));
+  if (log.stack && log.stack.trim()) {
+    panel.appendChild(buildSection('Stack trace', log.stack.trim()));
+  }
+
+  row.after(panel);
+  row.classList.add('open');
+}
+
+async function copyText(text) {
+  // navigator.clipboard needs a secure context; on a plain-http LAN it's unavailable,
+  // so fall back to a temporary textarea + execCommand.
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) { /* fall through */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch (e) {
+    return false;
+  }
 }
 
 function nearBottom() {
@@ -299,6 +384,20 @@ el.btnPause.addEventListener('click', () => {
 el.btnWrap.addEventListener('click', () => {
   const on = el.logList.classList.toggle('wrap');
   el.btnWrap.classList.toggle('on', on);
+});
+
+el.btnDownload.addEventListener('click', () => {
+  // Downloads the complete, untruncated log for the current device scope.
+  // The server sets the filename via Content-Disposition.
+  const url = state.sessionFilter
+    ? `/export?session=${encodeURIComponent(state.sessionFilter)}`
+    : '/export';
+  const a = document.createElement('a');
+  a.href = url;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 });
 
 el.btnClear.addEventListener('click', async () => {
