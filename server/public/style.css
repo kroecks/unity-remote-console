@@ -167,7 +167,8 @@ html, body {
   align-items: baseline;
 }
 .row:hover { background: #12171e; }
-.row.has-stack { cursor: pointer; }
+.row.expandable { cursor: pointer; }
+.row.open { background: #12171e; }
 
 .row .ts { color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .row .tag {
@@ -188,19 +189,44 @@ html, body {
 .row.lvl-Exception { border-left-color: var(--exception); background: #1e0f12; }
 .row.lvl-Exception .msg { color: #ffb0b8; }
 
-.stack {
+.detail {
   grid-column: 1 / -1;
-  margin: 4px 0 4px 0;
-  padding: 8px 10px;
+  margin: 4px 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.detail-section { display: flex; flex-direction: column; }
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 4px 2px;
+}
+.detail-label { color: var(--text-faint); font-size: 11px; font-family: var(--sans); }
+.detail-copy {
+  font: inherit; font-size: 11px; font-family: var(--sans);
+  padding: 3px 9px; border-radius: 5px;
+  border: 1px solid var(--line); background: transparent; color: var(--text-dim);
+  cursor: pointer;
+}
+.detail-copy:hover { background: var(--bg-raise); color: var(--text); }
+.detail-copy.done { color: #34d399; border-color: color-mix(in srgb, #34d399 45%, var(--line)); }
+.detail-body {
   background: var(--bg-panel);
   border: 1px solid var(--line);
   border-radius: 6px;
-  color: var(--text-dim);
+  padding: 9px 11px;
+  color: var(--text);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 11.5px;
-  line-height: 1.5;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  max-height: 40vh;
+  overflow: auto;
 }
+.detail-note { color: var(--warning); font-size: 11px; font-family: var(--sans); margin-top: 6px; }
 
 /* ---------- Status bar ---------- */
 #statusbar {

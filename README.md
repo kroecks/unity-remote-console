@@ -131,7 +131,14 @@ cleartext HTTP by default, so for development builds you need to allow it:
 - Per-device sidebar with online/offline dots and log counts; click to filter.
 - Level toggles (Log / Warning / Error / Assert / Exception), text search.
 - Follow-tail (auto-pauses when you scroll up), pause-and-buffer, line wrap, clear.
-- Click any row with a stack trace to expand it.
+- Click any row to expand it: the detail panel shows the **full message** (with a
+  character count) and the stack trace, each in its own scrollable block with a
+  Copy button. Display is capped at 20,000 characters per block; a truncation
+  note points you to Copy or Download for anything longer.
+- **Download** button: saves a `.log` file for the selected device (or all
+  devices if none is selected). The file is the complete, untruncated buffer —
+  the reliable escape hatch when a log is too big to read in the browser. The
+  same data is available directly at `GET /export` and `GET /export?session=<id>`.
 
 ## Notes & limitations
 
