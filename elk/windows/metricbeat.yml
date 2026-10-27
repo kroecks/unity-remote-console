@@ -1,0 +1,47 @@
+# Metricbeat for a Windows machine (e.g. the Unity dev/test PC).
+#
+# 1. Download the Metricbeat 9.5.5 Windows zip from elastic.co/downloads/beats/metricbeat
+#    and extract it to C:\Program Files\Metricbeat
+# 2. Replace metricbeat.yml there with this file; set ES_URL / SHIPPER_PASSWORD below
+#    (or as system environment variables).
+# 3. In an elevated PowerShell:
+#      cd 'C:\Program Files\Metricbeat'
+#      .\metricbeat.exe test config -e
+#      .\metricbeat.exe test output -e
+#      .\install-service-metricbeat.ps1
+#      Start-Service metricbeat
+
+metricbeat.modules:
+  - module: system
+    period: 10s
+    metricsets: [cpu, memory, network, process, process_summary, diskio]
+    cpu.metrics: [percentages, normalized_percentages]
+    process.include_top_n:
+      by_cpu: 10
+      by_memory: 10
+
+  - module: system
+    period: 1m
+    metricsets: [filesystem, uptime]
+
+  # GPU: install the community nvidia_gpu_exporter (github.com/utkuozdemir/nvidia_gpu_exporter, :9835)
+  # as a service, then set enabled: true.
+  - module: prometheus
+    enabled: false
+    metricsets: [collector]
+    hosts: ["localhost:9835"]
+    metrics_path: /metrics
+    period: 10s
+
+tags: ["${AGENT_ROLE:unity-client}"]
+
+processors:
+  - add_host_metadata: ~
+
+output.elasticsearch:
+  hosts: ["${ES_URL:http://192.168.1.60:9200}"]
+  username: shipper
+  password: "${SHIPPER_PASSWORD:change-me-shipper}"
+
+setup.template.enabled: false
+setup.ilm.enabled: false

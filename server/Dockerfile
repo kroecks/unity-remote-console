@@ -7,7 +7,7 @@ COPY package.json package-lock.json* ./
 RUN npm install --omit=dev
 
 # App source.
-COPY server.js ./
+COPY server.js elastic.js elk-setup.js ./
 COPY public ./public
 
 EXPOSE 8080

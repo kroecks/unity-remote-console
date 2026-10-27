@@ -1,0 +1,148 @@
+# ELK host stack: Elasticsearch + Kibana + the Unity remote console (with ES forwarding).
+#
+# Deploy in Portainer: Stacks -> Add stack -> Web editor (paste this file), then add the
+# environment variables from .env.example in the "Environment variables" section.
+# Or from a shell:  docker compose --env-file .env up -d
+#
+# Before the first start, on the VM itself:
+#   echo 'vm.max_map_count=262144' | sudo tee /etc/sysctl.d/99-elasticsearch.conf && sudo sysctl --system
+#
+# Ports:  5601 Kibana | 9200 Elasticsearch (shippers) | 8080 live console UI + /ingest | 9999/udp discovery
+
+x-console: &console
+  image: unity-remote-console:elk
+  build:
+    # Remote git context so Portainer's web editor can build it. Point at your fork/branch,
+    # or at a local path (e.g. ../../server) when deploying from a clone.
+    context: ${CONSOLE_BUILD_CONTEXT:-https://github.com/kroecks/unity-remote-console.git#master:server}
+
+services:
+  es01:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION:-9.5.5}
+    container_name: es01
+    restart: unless-stopped
+    environment:
+      - node.name=es01
+      - cluster.name=${CLUSTER_NAME:-homelab}
+      - discovery.type=single-node
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:?set ELASTIC_PASSWORD}
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=true
+      # Plain HTTP on the LAN keeps the shippers simple. See README to turn TLS on.
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      - xpack.license.self_generated.type=basic
+      - ES_JAVA_OPTS=-Xms${ES_HEAP:-4g} -Xmx${ES_HEAP:-4g}
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65535, hard: 65535 }
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -u elastic:$${ELASTIC_PASSWORD} 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+
+  # One-shot: kibana_system password, "shipper" user/role, retention, Unity index template.
+  es-setup:
+    <<: *console
+    command: ["node", "elk-setup.js", "elasticsearch"]
+    restart: "no"
+    environment:
+      - ES_URL=http://es01:9200
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+      - KIBANA_SYSTEM_PASSWORD=${KIBANA_SYSTEM_PASSWORD:?set KIBANA_SYSTEM_PASSWORD}
+      - SHIPPER_PASSWORD=${SHIPPER_PASSWORD:?set SHIPPER_PASSWORD}
+      - LOG_RETENTION=${LOG_RETENTION:-30d}
+      - METRICS_RETENTION=${METRICS_RETENTION:-14d}
+    depends_on:
+      es01: { condition: service_healthy }
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:${STACK_VERSION:-9.5.5}
+    container_name: kibana
+    restart: unless-stopped
+    environment:
+      - SERVER_NAME=kibana
+      - SERVER_PUBLICBASEURL=${KIBANA_PUBLIC_URL:-http://localhost:5601}
+      - ELASTICSEARCH_HOSTS=http://es01:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_SYSTEM_PASSWORD}
+      - XPACK_SECURITY_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY:?set KIBANA_ENCRYPTION_KEY (32+ chars)}
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
+      - XPACK_REPORTING_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
+    volumes:
+      - kibanadata:/usr/share/kibana/data
+    ports:
+      - "5601:5601"
+    depends_on:
+      es-setup: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -I http://localhost:5601 | grep -q 'HTTP/1.1 302 Found'"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+
+  # One-shot: Unity data view + saved searches in Kibana.
+  kibana-setup:
+    <<: *console
+    command: ["node", "elk-setup.js", "kibana"]
+    restart: "no"
+    environment:
+      - KIBANA_URL=http://kibana:5601
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+    depends_on:
+      kibana: { condition: service_healthy }
+
+  # One-shot: Metricbeat + Filebeat index templates and prebuilt dashboards.
+  # Runs here (with the superuser) so the agents only ever need the low-privilege shipper account.
+  metricbeat-setup:
+    image: docker.elastic.co/beats/metricbeat:${STACK_VERSION:-9.5.5}
+    restart: "no"
+    command: ["setup", "-e", "--strict.perms=false",
+              "-E", "setup.kibana.host=http://kibana:5601",
+              "-E", "setup.template.settings.index.number_of_replicas=0"]
+    environment:
+      - ELASTICSEARCH_HOSTS=http://es01:9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD}
+    depends_on:
+      kibana: { condition: service_healthy }
+
+  filebeat-setup:
+    image: docker.elastic.co/beats/filebeat:${STACK_VERSION:-9.5.5}
+    restart: "no"
+    command: ["setup", "-e", "--strict.perms=false", "--index-management", "--dashboards",
+              "-E", "setup.kibana.host=http://kibana:5601",
+              "-E", "setup.template.settings.index.number_of_replicas=0"]
+    environment:
+      - ELASTICSEARCH_HOSTS=http://es01:9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD}
+    depends_on:
+      kibana: { condition: service_healthy }
+
+  # Your remote console: UDP discovery + /ingest + live UI, now also forwarding to Elasticsearch.
+  # Host networking is required so LAN broadcast discovery reaches it.
+  remote-console:
+    <<: *console
+    container_name: unity-remote-console
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PORT=8080
+      - DISCOVERY_PORT=9999
+      - BUFFER_SIZE=5000
+      - ES_URL=http://127.0.0.1:9200
+      - ES_USER=shipper
+      - ES_PASSWORD=${SHIPPER_PASSWORD}
+      - ES_DATA_STREAM=logs-unity.console-${UNITY_NAMESPACE:-default}
+    depends_on:
+      es-setup: { condition: service_completed_successfully }
+
+volumes:
+  esdata:
+  kibanadata:

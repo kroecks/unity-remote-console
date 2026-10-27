@@ -110,6 +110,10 @@ cleartext HTTP by default, so for development builds you need to allow it:
 | `MAGIC`          | `UNITY_REMOTE_CONSOLE_V1`   | Must match the client's `Magic`      |
 | `BUFFER_SIZE`    | `5000`                      | Logs kept in memory / sent on connect|
 | `OFFLINE_AFTER_MS`| `10000`                    | Mark a device offline after silence  |
+| `ES_URL`          | _(unset)_                  | Forward every log to Elasticsearch (e.g. `http://127.0.0.1:9200`) |
+| `ES_USER` / `ES_PASSWORD` | _(unset)_          | Basic auth for Elasticsearch (or `ES_API_KEY`) |
+| `ES_DATA_STREAM`  | `logs-unity.console-default` | Target data stream                  |
+| `ES_MAX_QUEUE`    | `100000`                   | Logs held in memory while ES is down |
 
 ### Client (`RemoteConsoleClient.Configuration`)
 
@@ -139,6 +143,10 @@ cleartext HTTP by default, so for development builds you need to allow it:
   devices if none is selected). The file is the complete, untruncated buffer —
   the reliable escape hatch when a log is too big to read in the browser. The
   same data is available directly at `GET /export` and `GET /export?session=<id>`.
+
+## Elasticsearch / Kibana
+
+Set `ES_URL` and the server also bulk-indexes every log into Elasticsearch, so you can search history in Kibana. A full stack (Elasticsearch, Kibana, this console, and Metricbeat/Filebeat agents for other hosts) is in [`elk/`](elk/README.md).
 
 ## Notes & limitations
 

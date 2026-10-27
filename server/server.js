@@ -6,6 +6,7 @@ const http = require('http');
 const dgram = require('dgram');
 const express = require('express');
 const { WebSocketServer } = require('ws');
+const elastic = require('./elastic');
 
 // ---- Configuration (all overridable via environment variables) ----
 const HTTP_PORT = parseInt(process.env.PORT || '8080', 10);
@@ -76,6 +77,7 @@ app.post('/ingest', (req, res) => {
     stack: String(l.stack == null ? '' : l.stack),
   }));
   enriched.forEach(pushLog);
+  elastic.enqueue(enriched, s, req.socket.remoteAddress);
 
   if (enriched.length) broadcast({ type: 'logs', logs: enriched });
   broadcast({ type: 'session', session: s });
@@ -90,7 +92,7 @@ app.post('/clear', (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/healthz', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
+app.get('/healthz', (req, res) => res.json({ ok: true, uptime: process.uptime(), elastic: elastic.status() }));
 
 // ---- Export: download the buffer as a plain-text .log file ----
 function deviceDisplay(s) {
@@ -193,6 +195,22 @@ disco.on('error', (err) => {
 disco.bind(DISCOVERY_PORT);
 
 // ---- Start ----
+elastic.start();
+
+// Flush anything still queued for Elasticsearch when the container stops.
+async function shutdown() {
+  if (elastic.enabled) {
+    const deadline = Date.now() + 5000;
+    while (elastic.status().queued && Date.now() < deadline) {
+      await elastic.flush();
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+  process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
 server.listen(HTTP_PORT, '0.0.0.0', () => {
   const nets = os.networkInterfaces();
   const addrs = [];

@@ -1,0 +1,158 @@
+# Agent stack: run one copy on every machine you want metrics (and host/container logs) from,
+# including the ELK VM itself if you like.
+#
+# Deploy in Portainer: Stacks -> Add stack -> Web editor (paste this file) and set the
+# environment variables from .env.example. Configs are inline, so no files are needed on the host.
+# Requires Docker Compose >= 2.23 (any current Portainer CE / Docker install).
+
+services:
+  metricbeat:
+    image: docker.elastic.co/beats/metricbeat:${STACK_VERSION:-9.5.5}
+    container_name: metricbeat
+    restart: unless-stopped
+    user: root
+    network_mode: host          # host's interfaces + hostname, and reach a local GPU exporter
+    command: ["-e", "--strict.perms=false"]
+    environment:
+      - ES_URL=${ES_URL:?set ES_URL, e.g. http://192.168.1.60:9200}
+      - SHIPPER_PASSWORD=${SHIPPER_PASSWORD:?set SHIPPER_PASSWORD}
+      - GPU_METRICS=${GPU_METRICS:-false}
+      - AGENT_ROLE=${AGENT_ROLE:-server}
+    configs:
+      - source: metricbeat_yml
+        target: /usr/share/metricbeat/metricbeat.yml
+    volumes:
+      - /proc:/hostfs/proc:ro
+      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+      - /:/hostfs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - metricbeat-data:/usr/share/metricbeat/data
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:${STACK_VERSION:-9.5.5}
+    container_name: filebeat
+    restart: unless-stopped
+    user: root
+    network_mode: host
+    command: ["-e", "--strict.perms=false"]
+    environment:
+      - ES_URL=${ES_URL}
+      - SHIPPER_PASSWORD=${SHIPPER_PASSWORD}
+      - AGENT_ROLE=${AGENT_ROLE:-server}
+    configs:
+      - source: filebeat_yml
+        target: /usr/share/filebeat/filebeat.yml
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/log:/hostfs/var/log:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - filebeat-data:/usr/share/filebeat/data   # registry: remembers what was already shipped
+
+  # --- NVIDIA GPU hosts only -------------------------------------------------------------
+  # Needs the NVIDIA driver + nvidia-container-toolkit on the host. Uncomment, pin a current
+  # tag from https://catalog.ngc.nvidia.com/orgs/nvidia/teams/k8s/containers/dcgm-exporter,
+  # and set GPU_METRICS=true.
+  # dcgm-exporter:
+  #   image: nvcr.io/nvidia/k8s/dcgm-exporter:<tag>
+  #   container_name: dcgm-exporter
+  #   restart: unless-stopped
+  #   cap_add: [SYS_ADMIN]
+  #   ports: ["127.0.0.1:9400:9400"]
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
+
+volumes:
+  metricbeat-data:
+  filebeat-data:
+
+configs:
+  # "$$" escapes compose interpolation, so Metricbeat/Filebeat expand these from the
+  # container environment at runtime.
+  metricbeat_yml:
+    content: |
+      metricbeat.modules:
+        - module: system
+          hostfs: "/hostfs"
+          period: 10s
+          metricsets: [cpu, load, memory, network, process, process_summary, socket_summary, diskio]
+          cpu.metrics: [percentages, normalized_percentages]
+          core.metrics: [percentages]
+          process.include_top_n:
+            by_cpu: 10
+            by_memory: 10
+
+        - module: system
+          hostfs: "/hostfs"
+          period: 1m
+          metricsets: [filesystem, fsstat, uptime]
+          processors:
+            - drop_event.when.regexp:
+                system.filesystem.mount_point: '^/(sys|cgroup|proc|dev|etc|host|lib|snap|run)($$|/)'
+
+        - module: docker
+          metricsets: [container, cpu, memory, network, diskio, healthcheck, info]
+          hosts: ["unix:///var/run/docker.sock"]
+          period: 10s
+
+        # GPU via dcgm-exporter (see the commented service above)
+        - module: prometheus
+          enabled: $${GPU_METRICS:false}
+          metricsets: [collector]
+          hosts: ["localhost:9400"]
+          metrics_path: /metrics
+          period: 10s
+
+      tags: ["$${AGENT_ROLE:server}"]
+
+      processors:
+        - add_host_metadata: ~
+
+      output.elasticsearch:
+        hosts: ["$${ES_URL}"]
+        username: shipper
+        password: "$${SHIPPER_PASSWORD}"
+
+      # Templates, ILM and dashboards are installed once by the host stack.
+      setup.template.enabled: false
+      setup.ilm.enabled: false
+
+  filebeat_yml:
+    content: |
+      filebeat.inputs:
+        # stdout/stderr of every container on this host (all your Portainer stacks)
+        - type: filestream
+          id: docker-containers
+          paths: ["/var/lib/docker/containers/*/*.log"]
+          prospector.scanner.symlinks: true
+          parsers:
+            - container: ~
+          processors:
+            - add_docker_metadata:
+                host: "unix:///var/run/docker.sock"
+
+        # Host system logs (Ubuntu rsyslog files)
+        - type: filestream
+          id: system-logs
+          paths:
+            - /hostfs/var/log/syslog
+            - /hostfs/var/log/auth.log
+            - /hostfs/var/log/kern.log
+          tags: ["system"]
+
+      tags: ["$${AGENT_ROLE:server}"]
+
+      processors:
+        - add_host_metadata: ~
+
+      output.elasticsearch:
+        hosts: ["$${ES_URL}"]
+        username: shipper
+        password: "$${SHIPPER_PASSWORD}"
+
+      setup.template.enabled: false
+      setup.ilm.enabled: false
